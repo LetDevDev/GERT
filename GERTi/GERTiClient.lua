@@ -1,30 +1,13 @@
--- GERT v1.0.2 - Release
+-- GERT v1.0.2 - DEV
 local GERTi = {}
 local component = require("component")
 local computer = require("computer")
 local event = require("event")
 local serialize = require("serialization")
-local modem = nil
-local tunnel = nil
 
-if (not component.isAvailable("tunnel")) and (not component.isAvailable("modem")) then
-	io.stderr:write("This program requires a network or linked card to run.")
-	os.exit(1)
-end
+GERTi.interfaces = {}
 
-if (component.isAvailable("modem")) then
-	modem = component.modem
-	modem.open(4378)
-
-	if (component.modem.isWireless()) then
-		modem.setStrength(500)
-	end
-end
-
-if (component.isAvailable("tunnel")) then
-	tunnel = component.tunnel
-end
-
+--Todo - Figure this out
 -- addresses
 local iAddress = nil
 local cachedAddress = {{}, {}, {}, {}, {}}
@@ -170,7 +153,7 @@ local function cacheAddress(gAddress, realAddress)
 end
 
 -- Low level function that abstracts away the differences between a wired/wireless network card and linked card.
-local function transmitInformation(sendTo, port, ...)
+local function transmitInformation(sendTo, ...)
 	if (port ~= 0) and (modem) then
 		return modem.send(sendTo, port, ...)
 	elseif (tunnel) then
