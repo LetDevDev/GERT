@@ -1,6 +1,7 @@
 local component = require("component")
 local event = require("event")
 local serial = require("serialization")
+local gert = require("GERTi")
 
 modem_driver = {}
 
@@ -44,12 +45,12 @@ modem_driver.isend = function(self,dest,proto,data)
   if not self.state then  --If the interface is down, do not send
     return false
   end
-  if GERT.utils.getBroadcastAddr(self) == dest then --if the target is this network's broadcast, perform hardware broadcast
+  if gert.utils.getBroadcastAddr(self) == dest then --if the target is this network's broadcast, perform hardware broadcast
     return component.invoke(self.hw_addr,"broadcast",self.hw_channel,"gert_packet",self.addr,dest,proto,data)
   else
     success,mac = resolve(self,dest)
     if success then
-      return component.invoke(self.hw_addr,"send",mac,self.hw_channel,"gert_packet",self.addr,dest,proto,data)
+      return component.invoke(self.hw_addr,"send",mac,self.hw_channel,"gert_packet",proto,self.addr,dest,,data)
     end
     return success
   end
@@ -146,3 +147,5 @@ function modem_driver.remove(name)
     gert.interfaces[name] = nil
   end
 end
+
+return modem_driver
