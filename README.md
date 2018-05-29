@@ -1,4 +1,4 @@
-# Global Empire Routing Technology
-Home of the GERT networking technology. More detailed information can be found in the GERT whitepaper housed in this repository.
+# Private Fork of GERT
+DO NOT use the code present in this branch, this is a private testing fork and not part of the official GERT software.
 
-Please read the license
+Please refer to https://github.com/GlobalEmpire/GERT
