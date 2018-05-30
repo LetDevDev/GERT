@@ -7,26 +7,16 @@ local serialize = require("serialization")
 
 GERTi.interfaces = {}
 
---Todo - Figure this out
--- addresses
-local iAddress = nil
-local cachedAddress = {{}, {}, {}, {}, {}}
-local addressDex = 1
-
--- Tables of neighbors and connections
--- neighbors[x]{"address", "port", "tier"}
-local neighbors = {}
-local tier = 3
-local neighborDex = 1
-
--- connections[x]{"destination", "origination", "data", "dataDex", "connectionID", "doEvent"} Connections are established at endpoints
-local connections = {}
-local connectDex = 1
--- paths[x]{"destination", "origination",  "nextHop", "port"}
-local paths = {}
-local pathDex = 1
-
 local handler = {}
+
+GERTi.utils = {
+  isSameSubnet = function(first,second,mask)
+    return (first & mask) == (second & mask)
+  end,
+  getBroadcastAddr = function(interface)
+    return (~interface.subnet) | interface.addr
+  end
+}
 
 local function sortTable(elementOne, elementTwo)
 	return (tonumber(elementOne["tier"]) < tonumber(elementTwo["tier"]))
@@ -44,7 +34,7 @@ local function addTempHandler(timeout, code, cb, cbf)
 			return false
 		end
 	end
-	event.listen("modem_message", cbi)
+	event.listen("unet_message", cbi)
 	event.timer(timeout, function ()
 		event.ignore("modem_message", cbi)
 		if disable then return end
@@ -120,6 +110,7 @@ local function storePath(origination, destination, nextHop, port)
 	pathDex = pathDex + 1
 	return (pathDex-1)
 end
+
 -- Stores data inside a connection for use by a program
 local function storeData(connectionID, data, origination)
 	local connectNum
@@ -191,7 +182,7 @@ end
 handler["CloseConnection"] = function(sendingModem, port, code, connectionID, destination, origin)
 	for key, value in pairs(paths) do
 		if value["destination"] == destination and value["origination"] == origin then
-			if value["nextHop"] ~= (modem or tunnel).address then
+			if value["nextHop"] ~= .address then
 				transmitInformation(value["nextHop"], value["port"], "CloseConnection", connectionID, destination, origin)
 			end
 			table.remove(paths, key)
@@ -210,7 +201,7 @@ handler["DATA"] = function (sendingModem, port, code, data, destination, origina
 	-- Attempt to determine if host is the destination, else send it on to next hop.
 	for key, value in pairs(paths) do
 		if value["destination"] == destination and value["origination"] == origination then
-			if value["destination"] == (modem or tunnel).address then
+			if value["destination"] == .address then
 				return storeData(connectionID, data, origination)
 			else
 				return transmitInformation(value["nextHop"], value["port"], "DATA", data, destination, origination, connectionID)
@@ -232,7 +223,7 @@ local function routeOpener(destination, origination, beforeHop, nextHop, receive
 			return storePath(origination, destination, nextHop, transmitPort)
 		end
 	end
-	if (modem or tunnel).address ~= destination then
+	if .address ~= destination then
 		local connect1 = 0
 		transmitInformation(nextHop, transmitPort, "OPENROUTE", destination, nextHop, origination, outbound, connectionID, originGAddress)
 		addTempHandler(3, "ROUTE OPEN", function (eventName, recv, sender, port, distance, code, pktDest, pktOrig)
@@ -327,7 +318,7 @@ local serialTable = serialize.serialize(neighbors)
 local mncUnavailable = true
 if serialTable ~= "{}" then
 	-- Even if there is no neighbor table, still register to try and form a network regardless
-	local addr = (modem or tunnel).address
+
 	transmitInformation(neighbors[1]["address"], neighbors[1]["port"], "RegisterNode", addr, tier, serialTable)
 	addTempHandler(3, "RegisterComplete", function (_, _, _, _, _, code, targetMA, iResponse)
 		if targetMA == addr then
@@ -352,7 +343,7 @@ local function safedown()
 		modem.broadcast(4378, "RemoveNeighbor", modem.address)
 	end
 	for key, value in pairs(connections) do
-		handler["CloseConnection"]((modem or tunnel).address, 4378, "CloseConnection", value["connectionID"], value["destination"], value["origination"])
+		--handler["CloseConnection"](.address, 4378, "CloseConnection", value["connectionID"], value["destination"], value["origination"])
 	end
 end
 event.listen("shutdown", safedown)
@@ -388,12 +379,12 @@ end
 
 local function closeConnection(self)
 	transmitInformation(self.nextHop, self.outPort, "CloseConnection", self.ID, self.destination, self.origination)
-	handler["CloseConnection"]((modem or tunnel).address, 4378, "CloseConnection", self.ID, self.destination, self.origination)
+	handler["CloseConnection"](.address, 4378, "CloseConnection", self.ID, self.destination, self.origination)
 end
 -- This is the function that allows end-users to open sockets, which are the primary method of reading and writing data with GERT.
 function GERTi.openSocket(gAddress, doEvent, provID)
 	local destination, err = resolveAddress(gAddress)
-	local origination = (modem or tunnel).address
+	local origination = .address
 	local nextHop
 	local outID = (provID or connectDex)
 	local outDex = 0
