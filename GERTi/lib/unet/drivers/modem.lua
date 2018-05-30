@@ -3,7 +3,18 @@ local event = require("event")
 local serial = require("serialization")
 local gert = require("GERTi")
 
+local ttl = {1,2}
+local pro = {3,4}
+local src = {5,10}
+local dst ={11,16}
+
+
 modem_driver = {}
+
+local function readHeader(s)
+    return tonumber("0x"..s:sub(ttl[1],ttl[2])), tonumber("0x"..s:sub(pro[1],pro[2])), 
+    tonumber("0x"..s:sub(src[1],src[2])),tonumber("0x"..s:sub(dst[1],dst[2]))
+end
 
 --[[ Arp resolution, given a GERT interface, will dicover the target node
 interface: the GERT interface to use for resolution
@@ -43,22 +54,23 @@ returns a boolean representing success
 ]]
 modem_driver.isend = function(self,dest,proto,data)
   if not self.state then  --If the interface is down, do not send
-    return false
+    return false, "interface is down"
   end
   if gert.utils.getBroadcastAddr(self) == dest then --if the target is this network's broadcast, perform hardware broadcast
-    return component.invoke(self.hw_addr,"broadcast",self.hw_channel,"gert_packet",self.addr,dest,proto,data)
+    return component.invoke(self.hw_addr,"broadcast",self.hw_channel,"gert_packet",string.format("%X%X%X%X",127,proto,self.addr,dest),data)
   else
     success,mac = resolve(self,dest)
     if success then
-      return component.invoke(self.hw_addr,"send",mac,self.hw_channel,"gert_packet",proto,self.addr,dest,,data)
+      return component.invoke(self.hw_addr,"send",mac,self.hw_channel,"gert_packet",string.format("%X%X%X%X",127,proto,self.addr,dest),data)
     end
     return success
   end
 end
 
 --Driver receive event listener, not for application use.
-modem_driver.recieve = function(name,our_mac,their_mac,channel,distance,preamble,their_ip,our_ip,proto,data)
+modem_driver.recieve = function(name,our_mac,their_mac,channel,distance,preamble,header,data)
   if preamble == "gert_packet" then
+    local _,proto,their_ip,our_ip = readHeader(header)
     for k,v in pairs(gert.interfaces) do
       if v.hw_addr == our_mac and (v.addr == our_ip or gert.utils.getBroadcastAddr(v) == our_ip) then
         event.push("gert_packet",our_ip,their_ip,proto,data)
@@ -66,6 +78,7 @@ modem_driver.recieve = function(name,our_mac,their_mac,channel,distance,preamble
     end
   elseif preamble == "arp_request" then
     for k,v in pairs(gert.interfaces) do
+      local _,proto,their_ip,our_ip = readHeader(header)
       if v.hw_addr == our_mac and v.addr == our_ip then
         component.invoke(v.hw_addr,"send",their_mac,channel,"arp_reply",v.addr)
       end
@@ -73,7 +86,7 @@ modem_driver.recieve = function(name,our_mac,their_mac,channel,distance,preamble
   end
 end
 
-event.listen("modem_message",recieve)
+event.listen("modem_message",modem_driver.recieve)
 
 --[[create the wrapper for a new interface
 name: the name to use for the interface
@@ -115,14 +128,25 @@ end
 
 --Called at startup, loads all the modem interfaces into memory and starts them
 function modem_driver.load()
-  dofile("/etc/unet/drivers/modems.cfg")
+  modems = dofile("/etc/unet/drivers/modems.cfg")
+  for k,v in pairs(modems) do
+    if v.state and not component.invoke(v.hw_addr,"isOpen",v.hw_channel) 
+      and not component.invoke(v.hw_addr,"open",v.hw_channel) then
+      v.state = false
+    end
+    if v.dhcp then
+      v.address = math.floor(math.random(0,255))  --Replace with DHCP protocol
+      v.subnet = 0xFFFF00
+    end
+    gert.interfaces[k] = v
+  end
 end
 
 --Called when it's time to commit changes to the drive
 function modem_driver.save()
   local modems = {}
   for k,v in pairs(gert.interfaces) do
-    if hw_type and hw_type == "modem" then
+    if v.hw_type and v.hw_type == "modem" then
       modems[k] = v
       modems[k].arp_cache = {max_entries = v.arp_cache.max_entries} --Purge arp entries
       if v.dhcp then  --if the address is dhcp, then it is configured at load time
@@ -132,9 +156,7 @@ function modem_driver.save()
       send = nil
     end
   end
-  --[[io.open("/etc/unet/drivers/modems.cfg")   --To be properly written later
-    io.write(serial.serialize(gert.interfaces = modems))
-  io.close()]]
+  io.open("/etc/unet/drivers/modems.cfg","w"):write("return "..serial.serialize(modems)):close()
 end
 
 --[[Remove a wrapper from the loaded interfaces and release the hw port
