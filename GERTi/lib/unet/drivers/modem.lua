@@ -52,14 +52,18 @@ dest: the GERT address to send too
 proto: the GERT header to attach, see documentation
 returns a boolean representing success
 ]]
-modem_driver.isend = function(self,dest,proto,data)
+modem_driver.isend = function(self,dest,proto,data,via)
   if not self.state then  --If the interface is down, do not send
     return false, "interface is down"
   end
   if gert.utils.getBroadcastAddr(self) == dest then --if the target is this network's broadcast, perform hardware broadcast
     return component.invoke(self.hw_addr,"broadcast",self.hw_channel,"gert_packet",string.format("%X%X%X%X",127,proto,self.addr,dest),data)
   else
-    success,mac = resolve(self,dest)
+    if via then
+      success,mac = resolve(self,via)
+    else
+      success,mac = resolve(self,dest)
+    end
     if success then
       return component.invoke(self.hw_addr,"send",mac,self.hw_channel,"gert_packet",string.format("%X%X%X%X",127,proto,self.addr,dest),data)
     end
@@ -169,5 +173,7 @@ function modem_driver.remove(name)
     gert.interfaces[name] = nil
   end
 end
+
+gert.drivers.modem = modem_driver
 
 return modem_driver
