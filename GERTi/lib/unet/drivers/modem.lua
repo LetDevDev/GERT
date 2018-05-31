@@ -6,14 +6,13 @@ local gert = require("GERTi")
 local ttl = {1,2}
 local pro = {3,4}
 local src = {5,10}
-local dst ={11,16}
+local dst = {11,16}
 
 
 modem_driver = {}
 
 local function readHeader(s)
-    return tonumber("0x"..s:sub(ttl[1],ttl[2])), tonumber("0x"..s:sub(pro[1],pro[2])), 
-    tonumber("0x"..s:sub(src[1],src[2])),tonumber("0x"..s:sub(dst[1],dst[2]))
+   return tonumber("0x"..s:sub(ttl[1],ttl[2])), tonumber("0x"..s:sub(pro[1],pro[2])), tonumber("0x"..s:sub(src[1],src[2])),tonumber("0x"..s:sub(dst[1],dst[2]))
 end
 
 --[[ Arp resolution, given a GERT interface, will dicover the target node
@@ -21,7 +20,7 @@ interface: the GERT interface to use for resolution
 addr: the GERT address to resolve
 returns true and a mac address on success, false and a error string on failure
 ]]
-modem_driver.resolve = function(interface, addr)
+local resolve = function(interface, addr)
   if not interface.hw_type == "modem" then
     return false, "interface not a modem"
   end
@@ -44,7 +43,7 @@ modem_driver.resolve = function(interface, addr)
   
   return false, "no device found"
 end
-
+modem_driver.resolve = resolve
 
 --[[ Interface send, GERT wrapper object to transmit a packet using a modem
 self: the GERT interface to use for transmission
@@ -52,12 +51,12 @@ dest: the GERT address to send too
 proto: the GERT header to attach, see documentation
 returns a boolean representing success
 ]]
-modem_driver.isend = function(self,dest,proto,data,via)
+local isend = function(self,dest,proto,data,via)
   if not self.state then  --If the interface is down, do not send
     return false, "interface is down"
   end
   if gert.utils.getBroadcastAddr(self) == dest then --if the target is this network's broadcast, perform hardware broadcast
-    return component.invoke(self.hw_addr,"broadcast",self.hw_channel,"gert_packet",string.format("%X%X%X%X",127,proto,self.addr,dest),data)
+    return component.invoke(self.hw_addr,"broadcast",self.hw_channel,"gert_packet",string.format("%02X%02X%06X%06X",127,proto,self.addr,dest),data)
   else
     if via then
       success,mac = resolve(self,via)
@@ -65,11 +64,13 @@ modem_driver.isend = function(self,dest,proto,data,via)
       success,mac = resolve(self,dest)
     end
     if success then
-      return component.invoke(self.hw_addr,"send",mac,self.hw_channel,"gert_packet",string.format("%X%X%X%X",127,proto,self.addr,dest),data)
+      return component.invoke(self.hw_addr,"send",mac,self.hw_channel,"gert_packet",string.format("%02X%02X%06X%06X",127,proto,self.addr,dest),data)
     end
     return success
   end
 end
+
+modem_driver.isend = isend
 
 --Driver receive event listener, not for application use.
 modem_driver.recieve = function(name,our_mac,their_mac,channel,distance,preamble,header,data)
@@ -82,8 +83,7 @@ modem_driver.recieve = function(name,our_mac,their_mac,channel,distance,preamble
     end
   elseif preamble == "arp_request" then
     for k,v in pairs(gert.interfaces) do
-      local _,proto,their_ip,our_ip = readHeader(header)
-      if v.hw_addr == our_mac and v.addr == our_ip then
+      if v.hw_addr == our_mac and v.addr == header then
         component.invoke(v.hw_addr,"send",their_mac,channel,"arp_reply",v.addr)
       end
     end
@@ -142,6 +142,7 @@ function modem_driver.load()
       v.address = math.floor(math.random(0,255))  --Replace with DHCP protocol
       v.subnet = 0xFFFF00
     end
+    v.send = isend
     gert.interfaces[k] = v
   end
 end
