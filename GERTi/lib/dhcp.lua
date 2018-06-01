@@ -3,11 +3,21 @@ local gert = require("GERTi")
 local serial = require("serialization")
 
 local timeout = 5
+local max_tries = 5
 
 dhcp = {}
 
 dhcp.link_local = function(interface)
-  local 
+  local tries = 0
+  while tries < max_tries do
+    local address = math.floor(math.random(1,254))
+    if not gert.drivers[interface.hw_type].resolve(interface,address) then
+      interface.addr = address
+      interface.subnet = 0xFFFF00
+      return true
+    end
+  end
+  return false
 end
 
 dhcp.request = function(interface)
