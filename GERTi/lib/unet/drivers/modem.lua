@@ -72,12 +72,35 @@ end
 
 modem_driver.isend = isend
 
+--Promiscuous send, for spoofing source addresses.
+local psend = function(self,source,dest,proto,data,via)
+  if not self.state then  --If the interface is down, do not send
+    return false, "interface is down"
+  end
+  --At this time, spoofing should not be allowed for broadcasts
+  --[[if gert.utils.getBroadcastAddr(self) == dest then --if the target is this network's broadcast, perform hardware broadcast
+    return component.invoke(self.hw_addr,"broadcast",self.hw_channel,"gert_packet",string.format("%02X%02X%06X%06X",127,proto,self.addr,dest),data)
+  else]]
+    if via then
+      success,mac = resolve(self,via)
+    else
+      success,mac = resolve(self,dest)
+    end
+    if success then
+      return component.invoke(self.hw_addr,"send",mac,self.hw_channel,"gert_packet",string.format("%02X%02X%06X%06X",127,proto,source,dest),data)
+    end
+    return success
+  --end
+end
+
+modem_driver.psend = psend
+
 --Driver receive event listener, not for application use.
 modem_driver.recieve = function(name,our_mac,their_mac,channel,distance,preamble,header,data)
   if preamble == "gert_packet" then
     local _,proto,their_ip,our_ip = readHeader(header)
     for k,v in pairs(gert.interfaces) do
-      if v.hw_addr == our_mac and (v.addr == our_ip or gert.utils.getBroadcastAddr(v) == our_ip) then
+      if v.hw_addr == our_mac and v.hw_channel == channel and ((v.addr == our_ip or gert.utils.getBroadcastAddr(v) == our_ip) or v.is_promiscuous) then
         event.push("gert_packet",our_ip,their_ip,proto,data)
       end
     end
@@ -106,7 +129,7 @@ function modem_driver.create(name,hw_addr,channel,cache,addr,subnet,dhcp)
     return false, "no such component"
   end
   
-  if not component.invoke(hw_addr,"open",channel) then
+  if not component.invoke(hw_addr,"isOpen",channel) and not component.invoke(hw_addr,"open",channel) then
     return false, "no avalable ports"
   end
   
@@ -123,8 +146,7 @@ function modem_driver.create(name,hw_addr,channel,cache,addr,subnet,dhcp)
     dhcp = dhcp,
     subnet = subnet,
     state = true, 
-    
-    send = isend
+    send = isend,
   }
   
   return true
@@ -142,6 +164,9 @@ function modem_driver.load()
       v.address = math.floor(math.random(0,255))  --Replace with DHCP protocol
       v.subnet = 0xFFFF00
     end
+    if v.is_promiscuous then
+      v.psend = psend
+    end
     v.send = isend
     gert.interfaces[k] = v
   end
@@ -158,7 +183,7 @@ function modem_driver.save()
         modems[k].address = 0
         modems[k].subnet = 0
       end
-      send = nil
+      v.send = nil
     end
   end
   io.open("/etc/unet/drivers/modems.cfg","w"):write("return "..serial.serialize(modems)):close()
