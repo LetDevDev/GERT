@@ -25,9 +25,9 @@ dhcp.request = function(interface)
   interface:send(baddr,2,"D")
   local offer = {event.pull(timeout,"gert_packet",interface.addr,nil,2)}
   
-  if not type(offer) == "table" then return false end
+  if not type(offer) == "table" or #offer < 5 then return false end
   
-  local offer_data = serial.unserialize(offer[5])
+  local offer_data = serial.unserialize(offer[5]:sub(2))
   interface:send(baddr,2,"R"..string.format("0x%06X",offer_data.addr))
   local ackowledged = {event.pull(timeout,"gert_packet",interface.addr,nil,2,"A")}
   
