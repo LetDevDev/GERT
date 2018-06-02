@@ -25,7 +25,7 @@ icmp.ping = function(dest,data,timeout)
 end
 
 --replies should be formatted as "04{"XXXXXX/XXXXXX"=XXXXXX
-icmp.find_routes(interface)
+icmp.find_routes = function(interface)
   interface:send(GERTi.utils.getBroadcastAddr(interface),1,"03")
 
   local scanning = true
@@ -35,7 +35,7 @@ icmp.find_routes(interface)
     local t = {event.pull("gert")}
     if t[1] == "gert_scan_end" then
       scanning = false
-    elseif t[1] == "gert_packet" and t[2] == interface.addr and t[4] == 2 and t[5]:sub(1,2) == "04" them
+    elseif t[1] == "gert_packet" and t[2] == interface.addr and t[4] == 1 and t[5]:sub(1,2) == "04" then
       r = serial.unserialize(t[5]:sub(3))
       for k,v in pairs(r) do
         if not GERTi.routes[k] then
