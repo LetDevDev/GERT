@@ -5,7 +5,7 @@ local serial = require("serialization")
 local timeout = 5
 local max_tries = 5
 
-dhcp = {}
+local dhcp = {}
 
 dhcp.link_local = function(interface)
   local tries = 0
@@ -37,3 +37,5 @@ dhcp.request = function(interface)
   interface.subnet = offer_data.subnet
   return true
 end
+
+return dhcp
