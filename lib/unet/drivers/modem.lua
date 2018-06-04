@@ -106,7 +106,7 @@ modem_driver.recieve = function(name,our_mac,their_mac,channel,distance,preamble
     end
   elseif preamble == "arp_request" then
     for k,v in pairs(gert.interfaces) do
-      if v.hw_addr == our_mac and v.addr == header then
+      if v.hw_addr == our_mac and v.addr == header then --The header field actually carries the IP address of the request
         component.invoke(v.hw_addr,"send",their_mac,channel,"arp_reply",v.addr)
       end
     end
