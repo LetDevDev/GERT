@@ -1,18 +1,33 @@
 local event = require("event")
 local gert = require("GERTi")
 
+--Fixed value, the max data recieved that can be buffered in this library.
 local bufferMax = 65535
 
 local udp = {
 bufferMax = bufferMax,
 }
 
+--All opened sockets are stored here, this is intentionally hidden
+--Keys are arranged in a map, formatted as DDDDDDIIII where D is Dest and I is ID
 local connections = {}
 
+--[[Basic send function. useful for quick packets
+dest: The destination IP Address
+data: The data to send
+id: If provided, will use this instead
+]]
+function udp.send(dest,data,id)
+  if not id then id = math.floor(math.random(0,65535)) end
+  gert.send(dest,8,string.format("%04X",id)..data)
+end
+
+--Write data to a socket
 local function swrite(self,data)
   gert.send(self.dest,8,string.format("%04X",self.id)..data)
 end
 
+--Read data from a socket
 local function sread(self)
   if #self.readBuffer == 0 then
     event.pull("udp_packet",self.dest,self.id)
@@ -22,87 +37,63 @@ local function sread(self)
   return returnBuffer
 end
 
+--Remove this socket from the connections, this halts buffering of messages
 local function sclose(self)
-  self.closed = true
+  connections[string.format("%06X%04X",self.dest,self.id)] = nil
 end
 
---Handy for cleaning up connections nobody wants
-function udp.collectGarbage()
-  local count = 0
-  for i=1,#connections do
-    if not connections[i] or connections[i].closed or not connections[i].bound then
-      table.remove(connections,i)
-      count = count + 1
-    end
-  end
-  return count
-end
-
-function udp.connections()
-  return #connections
-end
-
+--[[Open a socket
+dest: The destination IP address
+responder: NOT YET IMPLEMENTED
+id: The id of the connection, used to open a reply socket or force an id
+]]
 function udp.openSocket(dest,responder,id)
-  for _,v in pairs(connections) do
-    if v.id == id and v.dest == dest then --If there is already a socket open
-      if not v.bound then --The socket is not bound to an application, we can bind it
-        v.bound = true
-        return v
-      else --it is already open and bound, we can't touch it
-        return false, "connection open and bound"
-      end
-    end
+  --Enforce application's right to exclusive access to a socket
+  if connections[string.format("%06X%04X",dest,id] then
+    return false, "Socket already opened"
   end
   
+  --Avoid connection collisions
+  repeat  
+  id = math.floor(math.random(0,65535))      
+  until not connections[string.format("%06X%04X",dest,id)]
+    
   local socket = {
     dest = dest,
-    id = (id or math.floor(math.random(0,65535))),
-    closed = false,
+    id = id,
     readBuffer = "",
     bufferOverrun = false,
-    bound = true, --Sockets created by an application are always bound
     read = sread,
     write = swrite,
     close = sclose,
   }
   
-  table.insert(connections,socket)
+  connections[string.format("%06X%04X",dest,id] = socket
+  
   return socket
 end
 
+--Receiver for UDP traffic, not for use 
 local function udpReceive(name,receiver,sender,proto,data)
   if proto ~= 8 then return end
   
   conID = tonumber(data:sub(1,4),16)
   data = data:sub(5)
   
-  for _,v in pairs(connections) do
-    if v.dest == sender and v.id == conID then
-      if #v.readBuffer + #data > bufferMax then
-        v.bufferOverrun = true
-      else
-        v.readBuffer = v.readBuffer..data
-      end
-      event.push("udp_packet",sender,conID)
-      return
+  --If a socket is open for this connection, buffer the packet in it
+  if connections[string.format("%06X%04X",sender,conID] then
+    local conn = connections[string.format("%06X%04X",sender,conID]
+    if #conn.readBuffer + #data > bufferMax then
+      conn.bufferOverrun = true --Buffer exceeded flag is set and data is discarded
+    else
+      conn.readBuffer = conn.readBuffer..data
     end
+    event.push("udp_packet",sender,conID) --Data is ommited as it was buffered
+    return
   end
   
-  local newConnection = {
-    dest = sender,
-    id = conID,
-    closed = false,
-    readBuffer = data,
-    bufferOverrun = false,
-    bound = false, --Sockets created by an application are always bound
-    read = sread,
-    write = swrite,
-    close = sclose,
-  }
   
-  table.insert(connections,newConnection)
-  
-  event.push("udp_packet",sender,conID)
+  event.push("udp_packet",sender,conID,data) --Connection-less packets have their data in the event
 end
 
 event.listen("gert_packet",udpReceive)
