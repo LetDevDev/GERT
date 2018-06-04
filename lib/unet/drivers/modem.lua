@@ -11,6 +11,8 @@ local dst = {11,16}
 
 modem_driver = {}
 
+local modem_interfaces = {} --local copy of all our interfaces, to quickly reference when needed
+
 local function readHeader(s)
    return tonumber("0x"..s:sub(ttl[1],ttl[2])), tonumber("0x"..s:sub(pro[1],pro[2])), tonumber("0x"..s:sub(src[1],src[2])),tonumber("0x"..s:sub(dst[1],dst[2]))
 end
@@ -21,10 +23,6 @@ addr: the GERT address to resolve
 returns true and a mac address on success, false and a error string on failure
 ]]
 local resolve = function(interface, addr)
-  if not interface.hw_type == "modem" then
-    return false, "interface not a modem"
-  end
-  
   for i = 1, #interface.arp_cache do  --First check to see if the arp cache has it
     if interface.arp_cache[i][1] == addr then
       return true, interface.arp_cache[i][2]
@@ -43,6 +41,7 @@ local resolve = function(interface, addr)
   
   return false, "no device found"
 end
+
 modem_driver.resolve = resolve
 
 --[[ Interface send, GERT wrapper object to transmit a packet using a modem
@@ -99,13 +98,13 @@ modem_driver.psend = psend
 modem_driver.recieve = function(name,our_mac,their_mac,channel,distance,preamble,header,data)
   if preamble == "gert_packet" then
     local _,proto,their_ip,our_ip = readHeader(header)
-    for k,v in pairs(gert.interfaces) do
+    for k,v in pairs(modem_interfaces) do
       if v.hw_addr == our_mac and v.hw_channel == channel and ((v.addr == our_ip or gert.utils.getBroadcastAddr(v) == our_ip) or v.is_promiscuous) then
         event.push("gert_packet",our_ip,their_ip,proto,data)
       end
     end
   elseif preamble == "arp_request" then
-    for k,v in pairs(gert.interfaces) do
+    for k,v in pairs(modem_interfaces) do
       if v.hw_addr == our_mac and v.addr == header then --The header field actually carries the IP address of the request
         component.invoke(v.hw_addr,"send",their_mac,channel,"arp_reply",v.addr)
       end
@@ -127,17 +126,15 @@ for changes to persist, save should be called
 function modem_driver.create(name,hw_addr,channel,cache,addr,subnet,dhcp)
   if not component.slot(hw_addr) then
     return false, "no such component"
-  end
-  
-  if not component.invoke(hw_addr,"isOpen",channel) and not component.invoke(hw_addr,"open",channel) then
+  elseif component.type(hw_addr) ~= "modem" then
+    return false, "component not a modem"
+  elseif not component.invoke(hw_addr,"isOpen",channel) and not component.invoke(hw_addr,"open",channel) then
     return false, "no avalable ports"
-  end
-  
-  if gert.interfaces[name] then
+  elseif gert.interfaces[name] then
     return false, "interface with name exists"
   end
   
-  gert.interfaces[name] = {
+  modem_interfaces[name] = {
     hw_type = "modem",
     hw_addr = hw_addr,
     hw_channel = channel,
@@ -147,7 +144,10 @@ function modem_driver.create(name,hw_addr,channel,cache,addr,subnet,dhcp)
     subnet = subnet,
     state = true, 
     send = isend,
+    resolve = resolve,
   }
+  
+  gert.interfaces[name] = modem_interfaces[name]
   
   return true
 end
@@ -164,6 +164,8 @@ function modem_driver.load()
       v.psend = psend
     end
     v.send = isend
+    v.resolve = resolve
+    modem_interfaces[k] = v
     gert.interfaces[k] = v
   end
 end
@@ -171,7 +173,7 @@ end
 --Called when it's time to commit changes to the drive
 function modem_driver.save()
   local modems = {}
-  for k,v in pairs(gert.interfaces) do
+  for k,v in pairs(modem_interfaces) do
     if v.hw_type and v.hw_type == "modem" then
       modems[k] = v
       modems[k].arp_cache = {max_entries = v.arp_cache.max_entries} --Purge arp entries
@@ -181,6 +183,7 @@ function modem_driver.save()
       end
       v.send = nil
       v.psend = nil
+      v.resolve = nil
     end
   end
   io.open("/etc/unet/drivers/modems.cfg","w"):write("return "..serial.serialize(modems)):close()
@@ -191,9 +194,9 @@ name: the interface to remove
 For changes to persist, save should be called
 ]]
 function modem_driver.remove(name)
-  if gert.interfaces[name] then
-    component.invoke(gert.interfaces[name].hw_addr,"close",gert.interfaces[name].hw_channel)
-    gert.interfaces[name] = nil
+  if modem_interfaces[name] then
+    component.invoke(modem_interfaces[name].hw_addr,"close",modem_interfaces[name].hw_channel)
+    modem_interfaces[name] = nil
   end
 end
 
