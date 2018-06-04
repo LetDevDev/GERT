@@ -9,7 +9,8 @@ local src = {5,10}
 local dst = {11,16}
 
 
-tunnel_driver = {}
+local tunnel_driver = {}
+local tunnel_interfaces = {}
 
 local function readHeader(s)
    return tonumber("0x"..s:sub(ttl[1],ttl[2])), tonumber("0x"..s:sub(pro[1],pro[2])), tonumber("0x"..s:sub(src[1],src[2])),tonumber("0x"..s:sub(dst[1],dst[2]))
@@ -21,10 +22,6 @@ addr: the GERT address to resolve
 returns true if this address is the neighbor's success, false and a error string on failure
 ]]
 local resolve = function(interface, addr)
-  if not interface.hw_type == "tunnel" then
-    return false, "interface not a tunnel card"
-  end
-  
   component.invoke(interface.hw_addr,"send","arp_request",addr)
   
   success = event.pull(5,"modem_message",interface.hw_addr,nil,0,nil,"arp_reply",addr)
@@ -66,13 +63,13 @@ tunnel_driver.psend = psend
 function tunnel_driver.recieve(name,our_mac,their_mac,channel,distance,preamble,header,data)
   if preamble == "gert_packet" and channel == 0 then
     local _,proto,their_ip,our_ip = readHeader(header)
-    for k,v in pairs(gert.interfaces) do
+    for k,v in pairs(tunnel_interfaces) do
       if v.hw_addr == our_mac and ((v.addr == our_ip or gert.utils.getBroadcastAddr(v) == our_ip) or v.is_promiscuous) then
         event.push("gert_packet",our_ip,their_ip,proto,data)
       end
     end
   elseif preamble == "arp_request" and channel == 0 then
-    for k,v in pairs(gert.interfaces) do
+    for k,v in pairs(tunnel_interfaces) do
       if v.hw_addr == our_mac and v.addr == header then
         component.invoke(v.hw_addr,"send","arp_reply",v.addr)
       end
@@ -80,7 +77,7 @@ function tunnel_driver.recieve(name,our_mac,their_mac,channel,distance,preamble,
   end
 end
 
-event.listen("modem_message",modem_driver.recieve)
+event.listen("modem_message",tunnel_driver.recieve)
 
 --[[create the wrapper for a new interface
 name: the name to use for the interface
@@ -93,13 +90,13 @@ for changes to persist, save should be called
 function tunnel_driver.create(name,hw_addr,addr,subnet,dhcp)
   if not component.slot(hw_addr) then
     return false, "no such component"
-  end
-  
-  if gert.interfaces[name] then
+  elseif component.type(hw_addr) ~= "tunnel" then
+    return false, "component not a tunnel"
+  elseif gert.interfaces[name] then
     return false, "interface with name exists"
   end
   
-  gert.interfaces[name] = {
+  tunnel_interfaces[name] = {
     hw_type = "tunnel",
     hw_addr = hw_addr,
     addr = addr,
@@ -108,6 +105,8 @@ function tunnel_driver.create(name,hw_addr,addr,subnet,dhcp)
     state = true, 
     send = isend,
   }
+  
+  gert.interfaces[name] = tunnel_interfaces[name]
   
   return true
 end
@@ -123,6 +122,8 @@ function tunnel_driver.load()
       v.psend = psend
     end
     v.send = isend
+    v.resolve = resolve
+    tunnel_interfaces[k] = v
     gert.interfaces[k] = v
   end
 end
@@ -130,7 +131,7 @@ end
 --Called when it's time to commit changes to the drive
 function tunnel_driver.save()
   local tunnels = {}
-  for k,v in pairs(gert.interfaces) do
+  for k,v in pairs(tunnel_interfaces) do
     if v.hw_type and v.hw_type == "tunnel" then
       tunnels[k] = v
       if v.dhcp then  --if the address is dhcp, then it is configured at load time
@@ -139,6 +140,7 @@ function tunnel_driver.save()
       end
       v.send = nil
       v.psend = nil
+      v.resolve = nil
     end
   end
   io.open("/etc/unet/drivers/tunnels.cfg","w"):write("return "..serial.serialize(tunnels)):close()
@@ -149,7 +151,7 @@ name: the interface to remove
 For changes to persist, save should be called
 ]]
 function tunnel_driver.remove(name)
-  gert.interfaces[name] = nil
+  tunnel_interfaces[name] = nil
 end
 
 gert.drivers.tunnel = tunnel_driver
