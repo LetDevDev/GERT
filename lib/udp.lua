@@ -44,7 +44,7 @@ local function sread(self)
   end
   local length = tonumber("0x"..self.readBuffer:sub(1,4))
   returnBuffer = self.readBuffer:sub(5,length+4)
-  self.readBuffer = self.readBuffer:sub(length + 4, #self.readBuffer)
+  self.readBuffer = self.readBuffer:sub(length + 5, #self.readBuffer)
   return returnBuffer
 end
 
