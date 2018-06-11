@@ -1,0 +1,16 @@
+modem = component.proxy(component.list("modem")())
+
+i1 = {a=1,s=0xFFFF00}
+
+modem.open(1)
+
+while true do
+  t = {computer.pullSignal()}
+  if t[1] == "modem_message" then
+    if  t[6] == "arp_request" and t[7] == i1.a then
+      modem.send(t[3],1,"arp_reply",i1.a)
+    elseif t[6] == "gert_packet" and t[7]:sub(3,4) == "01" and tonumber("0x"..t[7]:sub(11,16)) == i1.a and t[8]:sub(1,2) == "01" then
+      modem.send(t[3],1,"gert_packet",t[7]:sub(1,4)..t[7]:sub(11,16)..t[7]:sub(5,10),"02"..t[8]:sub(3))
+    end
+  end
+end

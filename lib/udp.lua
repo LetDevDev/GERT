@@ -10,17 +10,16 @@ local udp = {
 
 --All opened sockets are stored here, this is intentionally hidden
 --Keys are arranged in a map, formatted as DDDDDDIIII where D is Dest and I is ID
-local connections = {}
+connections = {}
 
 --Given 2 ints between 0 and 65535, returns a string that can be converted back
 local function buildHeader(id,length)
-  return string.char(math.floor(id/256),id&255,math.floor(length/256),length&255)
+  return string.format("%04X%04X",id,length)
 end
 
 --Given a string in which the first 4 characters represent 2 ints, returns the ints themselves
 local function breakHeader(header)
-  local imsb, ilsb, lmsb, llsb = string.byte(header,1,4)
-  return ((imsb*256)+ilsb), ((lmsb*256)+llsb)
+  return tonumber("0x"..header:sub(1,4)), tonumber("0x"..header:sub(5,8))
 end
 
 --[[Basic send function. useful for quick packets
@@ -43,16 +42,15 @@ local function sread(self)
   if #self.readBuffer == 0 then
     event.pull("udp_packet",self.dest,self.id)
   end
-  local m,l = string.byte(self.readBuffer,1,2)
-  local length = (m*256)+l
-  returnBuffer = self.readBuffer:sub(length)
-  self.readBuffer = self.readBuffer:sub(length + 1, #self.readBuffer)
+  local length = tonumber("0x"..self.readBuffer:sub(1,4))
+  returnBuffer = self.readBuffer:sub(5,length+4)
+  self.readBuffer = self.readBuffer:sub(length + 4, #self.readBuffer)
   return returnBuffer
 end
 
 --Remove this socket from the connections, this halts buffering of messages
 local function sclose(self)
-  connections[string.format("%06X%04X",self.dest,self.id)] = nil
+  self = nil
 end
 
 --[[Open a socket
@@ -100,7 +98,7 @@ local function udpReceive(name,receiver,sender,proto,data)
   
   
   connID, length = breakHeader(data) --Extract the Connection ID, length, and data from the packet
-  data = data:sub(3,#data) --We leave the length header on for now though, we may need it later.
+  data = data:sub(5,#data) --We leave the length header on for now though, we may need it later.
   
   --If a socket is open for this connection, buffer the packet in it
   if connections[string.format("%06X%04X",sender,connID)] then
@@ -110,12 +108,12 @@ local function udpReceive(name,receiver,sender,proto,data)
     else
       conn.readBuffer = conn.readBuffer..data
     end
-    event.push("udp_packet",sender,conID) --Data is ommited as it was buffered
+    event.push("udp_packet",sender,connID) --Data is ommited as it was buffered
     return
   end
   
   
-  event.push("udp_packet",sender,conID,data:sub(3,#data)) --Connection-less packets have their data in the event
+  event.push("udp_packet",sender,connID,data:sub(5,#data)) --Connection-less packets have their data in the event
   --we also strip the length header
 end
 
