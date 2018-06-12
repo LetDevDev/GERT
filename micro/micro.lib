@@ -1,36 +1,27 @@
---GERT Micro - IOT Edition
+local component = require("component")
+local event = require("event")
 
-modem = component.proxy(component.list("modem")())
-
-mdr.f = "%02X%02X%06X%06X"
-function mdr.e(s)  return tonumber("0x"..s:sub(1,2)),tonumber("0x"..s:sub(3,4)),tonumber("0x"..s:sub(5,10)),tonumber("0x"..s:sub(11,16))end
-
---Resolve function,
-function mdr.r(s,a) 
-for i=1,#s.ar do if s.ar[i][a]then return s.ar[i][m]end end 
-s:p.broadcast(s:c,"arp_request",a)
-dl,ctd=computer.uptime()+5,5
-repeat t={computer.pullSignal(ctd)}
-if t[1]=="modem_message"and t[2]==s.p.address and t[4]==s.c and t[6]=="arp_reply"and t[7]==a then
-table.insert(s.ar,1,{a=a,m=[t[3]]})return t[3]
+gp1="modem_message"gp2="arp_request"gp3="arp_reply"gp4="gert_packet"tn=tonumber
+gert={f="%02X%02X%06X%06X",e=function(s)return tn("0x"..s:sub(1,2)),tn("0x"..s:sub(3,4)),tn("0x"..s:sub(5,10)),tn("0x"..s:sub(11,16))end,
+p=component.proxy(component.list("modem")()),c=1,a=2,m=0xFFFF00,ar={},rt={},
+r=function(s,a) for i=1,#s.ar do if s.ar[i][a]then return s.ar[i][m]end end 
+s.p.broadcast(s.c,gp2,a)dl,ctd=computer.uptime()+5,5 repeat t={computer.pullSignal(ctd)}
+if t[1]==gp1 and t[2]==s.p.address and t[4]==s.c and t[6]==gp3 and t[7]==a then
+table.insert(s.ar,1,{a=a,m=t[3]})s.ar[6]=nil return t[3]
 else ctd=(ctd+dl-5)-computer.uptime()end
-until computer.uptime() >= dl return false end
+until computer.uptime() >= dl return false end,
+re=function(s,...)t = {...}if t[1]==gp1 and t[2]==s.p.address and t[4]==s.c then
+if t[6]==gp2 and t[7]==s.a then s.p.send(t[3],s.c,gp3,s.a)return true
+elseif t[6]==gp4 then _,p,sur,d=s.e(t[7])if d==s.a then if p==1 and t[8]:sub(1,2)=="01" then s:s(sur,1,"02"..t[8]:sub(3)) else return true,sur,p,t[8]end end
+else return false end end end,
+s=function(s,d,p,m)if s.a|(~s.m)==d then s.p.broadcast(s.c,gp4,string.format(s.f,64,p,s.a,d),m)
+elseif not s.a&s.m==d&s.m then for k,v in pairs()do if v.a&v.m==d&v.m then r=v.r end end mac = s:r(r or d)if not mac then return false else
+s.p.send(mac,s.c,gp4,string.format(s.f,64,p,s.a,d),m)end end end}
+gert.p.open(gert.c)
 
-
---Send function, takes (usually implicit) self, dest,proto,and data
-function mdr.s(s,d,p,m) 
-if s.a|(~s.m)==d then
-s.p.broadcast(s.c,"gert_packet",string.format(mdr.f,64,p,s.a,d),m)
-else mac = s:r(d)if not mac return false else
-s.p.send(mac,s.c,"gert_packet",string.format(mdr.f,64,p,s.a,d),m)end end end
-
---"Recieve" function
-function mdr.re(s,...)t = {...}
-if t[1]=="modem_message"and t[2]==s.p.address and t[4]==s.c then
-if t[6]=="arp_request" and t[7]==s.a then
-s.p.send(t[3],s.c,"arp_reply",s.a)return true
-elseif t[6]=="gert_packet" then _,p,s,d = mdr.e(t[7]) if d==s.a then return true, d,s,p,t[8] end
-else return false end end end
-
---Interface one: p = proxy of the modem, c = channel (port) a = address, m = mask, ar = arp_cache r = receive s = send, re = resolve
-i1={p=modem,c=1,ar={},a=1,m=0xFFFF00,r=mdr.r,s=mdr.s,re=mdr.re}
+for i= 1,10 do
+t={gert:re(event.pull("modem"))}
+if t[1] and t[2] then
+  print("Message from: "..t[2].." on proto: "..t[3].." | "..t[4])
+end
+end
